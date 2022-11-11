@@ -1,11 +1,13 @@
+jsoup:
+  user-agent: HedgehogSearchBot
+  referrer: http://www.google.com
+
 indexing-settings:
   sites:
-    - url: https://www.lenta.ru
+    - url: https://lenta.ru/
       name: Лента.ру
-    - url: https://www.skillbox.ru
+    - url: https://skillbox.ru/
       name: Skillbox
-    - url: https://www.playback.ru
-      name: PlayBack.Ru
 
 spring:
   datasource:
