@@ -21,4 +21,5 @@ CREATE TABLE IF NOT EXISTS page
     content MEDIUMTEXT NOT NULL,
     FULLTEXT INDEX path_idx (path),
     FOREIGN KEY (site_id) REFERENCES site (id)
+        ON DELETE CASCADE
 );

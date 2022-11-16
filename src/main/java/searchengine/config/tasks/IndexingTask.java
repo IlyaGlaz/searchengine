@@ -1,16 +1,24 @@
 package searchengine.config.tasks;
 
+import lombok.Getter;
 import lombok.RequiredArgsConstructor;
-import lombok.SneakyThrows;
+import org.jsoup.nodes.Document;
+import org.springframework.http.HttpStatus;
 import searchengine.config.utils.JsoupUtil;
 import searchengine.model.Page;
+import searchengine.model.Site;
 import searchengine.repository.PageRepository;
 import searchengine.repository.SiteRepository;
 
-import java.util.concurrent.RecursiveAction;
+import java.io.IOException;
+import java.time.LocalDateTime;
+import java.util.Optional;
+import java.util.concurrent.ForkJoinTask;
+import java.util.concurrent.RecursiveTask;
 
+@Getter
 @RequiredArgsConstructor
-public class IndexingTask extends RecursiveAction {
+public class IndexingTask extends RecursiveTask<Boolean> {
 
     private static final String REF_VALUE = "abs:href";
     private static final String REF_SELECTOR = "a[href]";
@@ -22,23 +30,43 @@ public class IndexingTask extends RecursiveAction {
     private final PageRepository pageRepository;
 
     @Override
-    @SneakyThrows
-    protected void compute() {
-        var document = JsoupUtil.getDocument(url);
+    protected Boolean compute() {
+        Optional<Document> document = Optional.empty();
+        try {
+            document = JsoupUtil.getDocument(url);
+        } catch (InterruptedException | IOException e) {
+        }
+        var site = siteRepository.findByUrl(rootUrl);
         var page = Page.builder()
                 .path(url.replace(rootUrl, "/"))
-                .content(document.toString())
-                .site(siteRepository.findByUrl(rootUrl))
-                .code(document.connection().response().statusCode())
+                .site(site)
                 .build();
-        pageRepository.saveAndFlush(page);
+        var result = Boolean.TRUE;
+        if (document.isPresent()) {
+            page.setCode(document.get().connection().response().statusCode());
+            page.setContent(document.get().toString());
+            insertBoth(site, page);
 
-        var elements = document.select(REF_SELECTOR);
-        elements.stream()
-                .map(element -> element.attr(REF_VALUE))
-                .filter(url -> url.matches(rootUrl + INNER_SOURCE_DELIMITER))
-                .filter(url ->
-                        !pageRepository.findBySiteAndPath(url.replace(rootUrl, "/")).isPresent())
-                .forEach(url -> new IndexingTask(url, rootUrl, siteRepository, pageRepository).invoke());
+            result = document.get().select(REF_SELECTOR).stream()
+                    .map(element -> element.attr(REF_VALUE))
+                    .filter(url -> url.matches(rootUrl + INNER_SOURCE_DELIMITER))
+                    .filter(url ->
+                            pageRepository.findBySiteAndPath(url.replace(rootUrl, "/")).isEmpty())
+                    .map(url -> new IndexingTask(url, rootUrl, siteRepository, pageRepository).fork())
+                    .map(ForkJoinTask::join)
+                    .reduce((a, b) -> a && b)
+                    .orElse(Boolean.TRUE);
+        } else {
+            page.setCode(HttpStatus.NOT_FOUND.value());
+            page.setContent("");
+            insertBoth(site, page);
+        }
+        return result;
+    }
+
+    private void insertBoth(Site site, Page page) {
+        pageRepository.save(page);
+        site.setStatus_time(LocalDateTime.now());
+        siteRepository.save(site);
     }
 }
